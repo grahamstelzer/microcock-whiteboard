@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Whiteboard</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+html,body{margin:0;height:100%;overflow:hidden;font:13px system-ui,sans-serif}
+[hidden]{display:none!important}
+#view{position:fixed;inset:0;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;cursor:crosshair}
+#view[data-tool=select]{cursor:default}
+#view[data-tool=text]{cursor:text}
+#view[data-tool=eraser]{cursor:none}
+#view.grab,#view[data-tool=pan]{cursor:grab}
+#boards{position:fixed;left:8px;top:116px;z-index:10;flex-direction:column;flex-wrap:nowrap;align-items:stretch;justify-content:flex-start;min-width:270px;max-height:60vh;overflow:auto}
+.brow{display:flex;gap:4px;align-items:center}
+.brow .bname{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#bname{flex:1;background:#3b3e44;color:#eee;border:1px solid #555;border-radius:4px;padding:4px}
+#blist{display:flex;flex-direction:column;gap:4px}
+#status{opacity:.7;min-width:56px;text-align:center}
+#world{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0}
+.it,.tb,.im{position:absolute;left:0;top:0;pointer-events:none}
+.it{overflow:visible}
+.im{max-width:none;user-select:none}
+.tb{box-sizing:border-box;padding:6px 8px;line-height:1.3;min-height:1.3em;white-space:pre-wrap;overflow-wrap:anywhere;font-family:system-ui,sans-serif;font-weight:normal;border-radius:4px}
+.tb.edit{pointer-events:auto;user-select:text;-webkit-user-select:text;cursor:text;outline:2px solid #4c9aff}
+#ov{position:absolute;left:0;top:0;z-index:1000000000;pointer-events:none}
+#selbox{position:fixed;display:none;box-sizing:border-box;border:1.5px solid #4c9aff;pointer-events:none;z-index:5}
+#selbox i{position:absolute;width:10px;height:10px;box-sizing:border-box;background:#fff;border:1.5px solid #4c9aff;transform:translate(-50%,-50%);pointer-events:auto}
+#marq{position:fixed;display:none;border:1px dashed #4c9aff;background:#4c9aff22;pointer-events:none;z-index:5}
+#ering{position:fixed;display:none;box-sizing:border-box;border:1.5px solid #888;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:5}
+#ui{position:fixed;top:8px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;z-index:10;max-width:calc(100vw - 16px)}
+.bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center;padding:6px 8px;background:#2b2d31;color:#eee;border-radius:10px;box-shadow:0 2px 10px #0006;user-select:none}
+.bar button{background:#3b3e44;color:#eee;border:0;border-radius:6px;padding:5px 9px;font:inherit;cursor:pointer}
+.bar button:hover{background:#4a4d54}
+.bar button.on{background:#4c9aff;color:#fff}
+.bar input[type=number]{width:56px}
+.bar input[type=color]{width:28px;height:24px;padding:0;border:0;background:none}
+.bar select,.bar input[type=number]{background:#3b3e44;color:#eee;border:1px solid #555;border-radius:4px;padding:3px}
+.bar .sw{width:20px;height:20px;border-radius:50%;padding:0;border:2px solid transparent;box-shadow:inset 0 0 0 1px #777}
+.bar .sw.on{border-color:#fff;background-clip:padding-box}
+.sep{width:1px;height:20px;background:#555}
+#help{position:fixed;left:8px;bottom:8px;max-width:430px;padding:10px 12px;background:#2b2d31;color:#eee;border-radius:10px;line-height:1.5;z-index:10}
+</style>
+</head>
+<body>
+<div id="view" data-tool="pen">
+  <div id="world"><div id="ov"></div></div>
+  <div id="selbox"></div><div id="marq"></div><div id="ering"></div>
+</div>
+
+<div id="ui">
+  <div id="bar" class="bar">
+    <span id="tools"></span><span class="sep"></span>
+    <span id="pal"></span>
+    <input type="color" id="cc" title="Custom color" value="#1e1e1e">
+    <span class="sep"></span>
+    <label>Size <input type="range" id="size" min="1" max="40" value="4"></label>
+    <span class="sep"></span>
+    <button id="undo" title="Ctrl+Z">Undo</button><button id="redo" title="Ctrl+Shift+Z">Redo</button>
+    <span class="sep"></span>
+    <select id="theme" title="Background"></select>
+    <button id="grid" title="G">Grid</button>
+    <button id="zl" title="Reset zoom to 100%">100%</button>
+    <span class="sep"></span>
+    <button id="boardsBtn" title="Saved boards">Boards</button><span id="status"></span>
+    <span class="sep"></span>
+    <button id="img">Image</button><button id="save" title="Download this board as a JSON file">Export</button><button id="open" title="Load a JSON file into this board">Import</button><button id="clear">Clear</button><button id="helpBtn" title="?">?</button>
+    <input type="file" id="fileImg" accept="image/*" multiple hidden>
+    <input type="file" id="fileJson" accept=".json,application/json" hidden>
+  </div>
+  <div id="ctx" class="bar">
+    <span id="c-shape" hidden>
+      <button data-kind="rect">Rect</button><button data-kind="ellipse">Ellipse</button><button data-kind="tri">Triangle</button>
+      <button data-kind="diamond">Diamond</button><button data-kind="line">Line</button><button data-kind="arrow">Arrow</button>
+      <label><input type="checkbox" id="fillon"> Filled</label>
+    </span>
+    <span id="c-laser" hidden>
+      <label>Fade after <input type="number" id="laserSec" min="0.5" max="60" step="0.5" value="3"> s</label>
+    </span>
+    <span id="c-sel" hidden>
+      <label>Fill/BG <input type="color" id="fill" value="#ffd43b"></label><button id="nofill">No fill</button>
+      <span id="c-txt" hidden>
+        <label>Text px <input type="number" id="fs" min="6" max="400"></label>
+        <button id="bold"><b>B</b></button><button id="und"><u>U</u></button>
+      </span>
+      <span class="sep"></span>
+      <button data-l="back" title="Ctrl+Shift+[">Send to back</button><button data-l="down" title="Ctrl+[">Back</button>
+      <button data-l="up" title="Ctrl+]">Forward</button><button data-l="front" title="Ctrl+Shift+]">Bring to front</button>
+      <span class="sep"></span>
+      <button id="dup" title="Ctrl+D">Duplicate</button><button id="del" title="Delete">Delete</button>
+    </span>
+  </div>
+</div>
+
+<div id="boards" class="bar" hidden>
+  <div class="brow"><input id="bname" placeholder="Board name"><button id="bnew">New board</button></div>
+  <div id="blist"></div>
+</div>
+
+<div id="help" hidden>
+  <b>Tools</b>: V select, P pen, H highlighter, L temporary laser, E eraser, T text, S shape<br>
+  <b>Colors</b>: 1-8 &nbsp; <b>Size</b>: [ and ]<br>
+  <b>Zoom</b>: mouse wheel, Ctrl+wheel, + / - &nbsp; <b>Reset</b>: 0<br>
+  <b>Pan</b>: right-drag (any tool), M (hand tool, left-drag), Space+drag, Shift+wheel (horizontal), Alt+wheel (vertical), arrow keys. All work mid-stroke.<br>
+  <b>Select</b>: click, Shift+click, drag a box, Ctrl+A. Double-click a text box to edit.<br>
+  <b>Text</b>: Ctrl+B bold, Ctrl+U underline (inside a box), Esc finishes editing<br>
+  <b>Layers</b>: Ctrl+] forward, Ctrl+[ back, add Shift for front/back<br>
+  <b>Other</b>: Ctrl+Z / Ctrl+Shift+Z undo/redo, Ctrl+D duplicate, Delete, G grid, paste or drop images, Shift constrains shapes
+</div>
+
+<script>
+'use strict';
+/* ---------- constants and state ---------- */
+const $ = s => document.querySelector(s);
+const NS = 'http://www.w3.org/2000/svg';
+const view = $('#view'), world = $('#world'), ov = $('#ov');
+const PAL = ['#1e1e1e', '#f5f5f5', '#e03131', '#f08c00', '#2f9e44', '#1971c2', '#9c36b5', '#f783ac'];
+const LASER = '#52f5b0';
+const THEMES = { White: '#ffffff', Light: '#f0f0f0', Warm: '#e8e0cf', 'Mid gray': '#8c8c8c', Slate: '#3c4043', Dark: '#202124', Black: '#000000' };
+const SMOOTH = 0.55;          // 1 = raw input, lower = smoother
+const TOOLS = [['select', 'Select (V)', 'v'], ['pan', 'Pan (M)', 'm'], ['pen', 'Pen (P)', 'p'], ['hl', 'Highlighter (H)', 'h'], ['laser', 'Laser (L)', 'l'],
+               ['eraser', 'Eraser (E)', 'e'], ['text', 'Text (T)', 't'], ['shape', 'Shape (S)', 's']];
+
+let items = [];               // array order = z-order, last = topmost
+const els = new Map();        // item id -> DOM element
+let sel = new Set();          // selected item ids
+let V = { x: 0, y: 0, z: 1 }; // world -> screen: screen = world * z + (x, y)
+let tool = 'pen', kind = 'rect', fillOn = false, size = 4;
+let penC = PAL[0], hlC = '#ffd43b', theme = 'Light', grid = true, laserSec = 3;
+let act = null;               // current pointer gesture
+let editing = null;           // {id, isNew, html} while a text box is being edited
+let space = false, last = { x: 0, y: 0 };
+let hist = [], hi = -1;
+let lasers = [], raf = 0;
+
+const r = v => Math.round(v * 100) / 100;
+const newId = () => 'i' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const cur = () => tool === 'hl' ? hlC : penC;
+const toW = (x, y) => [(x - V.x) / V.z, (y - V.y) / V.z];
+const selItems = () => items.filter(i => sel.has(i.id));
+const eR = () => 6 + size * 1.5;   // eraser radius in screen px
+function lum(hex) { const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; }
+
+/* ---------- item model ----------
+   stroke: {pts:[[x,y]..], c, sw, hl}           freehand
+   line:   {pts:[a,b], arrow, c, sw}
+   shape:  {k:'rect'|'ellipse'|'tri'|'diamond', x,y,w,h, c, sw, f}
+   image:  {x,y,w,h, src}
+   text:   {x,y,w, html, fs, color, bg}
+   Arrays (pts) are never mutated after creation, only replaced; history snapshots rely on this. */
+
+function svgEl(tag, attrs) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+
+function pathD(p) {
+  if (p.length === 1) return `M${p[0][0]} ${p[0][1]}l0.01 0`;   // dot (round cap)
+  let d = `M${p[0][0]} ${p[0][1]}`;
+  for (let i = 1; i < p.length - 1; i++) {
+    const mx = (p[i][0] + p[i + 1][0]) / 2, my = (p[i][1] + p[i + 1][1]) / 2;
+    d += `Q${p[i][0]} ${p[i][1]} ${mx} ${my}`;
+  }
+  const e = p[p.length - 1];
+  return d + `L${e[0]} ${e[1]}`;
+}
+function lineD(p, arrow, sw) {
+  const a = p[0], b = p[1];
+  let d = `M${a[0]} ${a[1]}L${b[0]} ${b[1]}`;
+  if (arrow) {
+    const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), L = Math.max(14, sw * 4);
+    for (const s of [-1, 1]) {
+      const t = ang + Math.PI - s * 0.45;
+      d += `M${b[0]} ${b[1]}L${b[0] + L * Math.cos(t)} ${b[1] + L * Math.sin(t)}`;
+    }
+  }
+  return d;
+}
+function outline(it) {   // closed polygon for hit testing (and drawing tri/diamond)
+  const { x, y, w, h } = it;
+  if (it.k === 'rect') return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+  if (it.k === 'diamond') return [[x + w / 2, y], [x + w, y + h / 2], [x + w / 2, y + h], [x, y + h / 2]];
+  if (it.k === 'tri') return [[x + w / 2, y], [x + w, y + h], [x, y + h]];
+  const out = [];
+  for (let i = 0; i < 64; i++) { const a = i / 64 * 2 * Math.PI; out.push([x + w / 2 + w / 2 * Math.cos(a), y + h / 2 + h / 2 * Math.sin(a)]); }
+  return out;
+}
+
+/* ---------- DOM rendering ---------- */
+function mk(it) {
+  let el;
+  if (it.type === 'text') { el = document.createElement('div'); el.className = 'tb'; }
+  else if (it.type === 'image') { el = document.createElement('img'); el.className = 'im'; el.draggable = false; el.src = it.src; }
+  else {
+    el = svgEl('svg', { width: 1, height: 1 });
+    el.setAttribute('class', 'it');
+    let tag = 'path';
+    if (it.type === 'shape') tag = it.k === 'ellipse' ? 'ellipse' : it.k === 'rect' ? 'rect' : 'polygon';
+    el.appendChild(svgEl(tag, { 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+  }
+  return el;
+}
+function fill(it, el) {
+  const s = el.style;
+  if (it.type === 'text') {
+    s.left = it.x + 'px'; s.top = it.y + 'px'; s.width = it.w + 'px';
+    s.fontSize = it.fs + 'px'; s.color = it.color; s.background = it.bg || 'transparent';
+    if (el._h !== it.html && !(editing && editing.id === it.id)) { el.innerHTML = it.html; el._h = it.html; }
+    return;
+  }
+  if (it.type === 'image') {
+    s.left = it.x + 'px'; s.top = it.y + 'px'; s.width = it.w + 'px'; s.height = it.h + 'px';
+    return;
+  }
+  const n = el.firstChild;
+  n.setAttribute('stroke', it.c);
+  n.setAttribute('stroke-width', it.sw);
+  n.setAttribute('fill', it.type === 'shape' && it.f ? it.f : 'none');
+  s.opacity = it.hl ? 0.4 : 1;
+  if (it.type === 'stroke') n.setAttribute('d', pathD(it.pts));
+  else if (it.type === 'line') n.setAttribute('d', lineD(it.pts, it.arrow, it.sw));
+  else if (it.k === 'rect') { n.setAttribute('x', it.x); n.setAttribute('y', it.y); n.setAttribute('width', it.w); n.setAttribute('height', it.h); }
+  else if (it.k === 'ellipse') { n.setAttribute('cx', it.x + it.w / 2); n.setAttribute('cy', it.y + it.h / 2); n.setAttribute('rx', it.w / 2); n.setAttribute('ry', it.h / 2); }
+  else n.setAttribute('points', outline(it).map(p => p.join(',')).join(' '));
+}
+function sync() {   // make the DOM match `items`, including z-order
+  const ids = new Set(items.map(i => i.id));
+  for (const [id, el] of els) if (!ids.has(id)) { el.remove(); els.delete(id); }
+  items.forEach((it, i) => {
+    let el = els.get(it.id);
+    if (!el) { el = mk(it); els.set(it.id, el); world.appendChild(el); }
+    fill(it, el);
+    el.style.zIndex = i;
+  });
+  drawSel(); updateUI();
+}
+
+/* ---------- geometry: bounds and hit testing ---------- */
+function bbox(it) {
+  if (it.pts) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of it.pts) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }
+    return { x: x0 - it.sw / 2, y: y0 - it.sw / 2, w: x1 - x0 + it.sw, h: y1 - y0 + it.sw };
+  }
+  if (it.type === 'shape') return { x: it.x - it.sw / 2, y: it.y - it.sw / 2, w: it.w + it.sw, h: it.h + it.sw };
+  if (it.type === 'text') { const el = els.get(it.id); return { x: it.x, y: it.y, w: it.w, h: el ? el.offsetHeight : 30 }; }
+  return { x: it.x, y: it.y, w: it.w, h: it.h };
+}
+function dSeg(px, py, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy;
+  let t = l ? ((px - a[0]) * dx + (py - a[1]) * dy) / l : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - a[0] - t * dx, py - a[1] - t * dy);
+}
+function nearPath(p, closed, x, y, rad) {
+  if (p.length === 1) return Math.hypot(x - p[0][0], y - p[0][1]) <= rad;
+  for (let i = 0; i < p.length - 1; i++) if (dSeg(x, y, p[i], p[i + 1]) <= rad) return true;
+  return closed && dSeg(x, y, p[p.length - 1], p[0]) <= rad;
+}
+function inPoly(p, x, y) {
+  let c = false;
+  for (let i = 0, j = p.length - 1; i < p.length; j = i++)
+    if ((p[i][1] > y) !== (p[j][1] > y) && x < (p[j][0] - p[i][0]) * (y - p[i][1]) / (p[j][1] - p[i][1]) + p[i][0]) c = !c;
+  return c;
+}
+function hit(it, x, y, tol) {
+  if (it.pts) return nearPath(it.pts, false, x, y, it.sw / 2 + tol);
+  if (it.type === 'shape') { const o = outline(it); return (!!it.f && inPoly(o, x, y)) || nearPath(o, true, x, y, it.sw / 2 + tol); }
+  const b = bbox(it);
+  return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+}
+function pick(x, y) {   // topmost item under a world point
+  const tol = 5 / V.z;
+  for (let i = items.length - 1; i >= 0; i--) if (hit(items[i], x, y, tol)) return items[i];
+  return null;
+}
+function selBox() {
+  const s = selItems();
+  if (!s.length) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const it of s) { const b = bbox(it); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/* ---------- selection overlay ---------- */
+const sb = $('#selbox');
+const HANDLES = { nw: [0, 0], n: [50, 0], ne: [100, 0], e: [100, 50], se: [100, 100], s: [50, 100], sw: [0, 100], w: [0, 50] };
+for (const h in HANDLES) {
+  const i = document.createElement('i');
+  i.dataset.h = h; i.style.left = HANDLES[h][0] + '%'; i.style.top = HANDLES[h][1] + '%'; i.style.cursor = h + '-resize';
+  sb.appendChild(i);
+}
+function drawSel() {
+  const b = tool === 'select' && !editing ? selBox() : null;
+  if (!b) { sb.style.display = 'none'; return; }
+  sb.style.display = 'block';
+  sb.style.left = b.x * V.z + V.x + 'px'; sb.style.top = b.y * V.z + V.y + 'px';
+  sb.style.width = b.w * V.z + 'px'; sb.style.height = b.h * V.z + 'px';
+}
+
+/* ---------- view: pan, zoom, background ---------- */
+function drawBg() {
+  const c = THEMES[theme];
+  view.style.background = c;
+  if (!grid) { view.style.backgroundImage = 'none'; return; }
+  let g = 24 * V.z;
+  while (g < 10) g *= 5;   // keep dots from becoming too dense when zoomed out
+  const dot = lum(c) < 0.5 ? 'rgba(255,255,255,.18)' : 'rgba(0,0,0,.18)';
+  view.style.backgroundImage = `radial-gradient(${dot} 1px,transparent 1.5px)`;
+  view.style.backgroundSize = `${g}px ${g}px`;
+  view.style.backgroundPosition = `${V.x}px ${V.y}px`;
+}
+function applyView() {
+  world.style.transform = `translate(${V.x}px,${V.y}px) scale(${V.z})`;
+  drawBg(); drawSel();
+  $('#zl').textContent = Math.round(V.z * 100) + '%';
+}
+function zoomAt(sx, sy, f) {
+  const z = Math.min(40, Math.max(0.02, V.z * f));
+  f = z / V.z;
+  V.x = sx - (sx - V.x) * f; V.y = sy - (sy - V.y) * f; V.z = z;
+  applyView();
+}
+function panBy(dx, dy) {
+  V.x += dx; V.y += dy; applyView();
+  // the pointer now maps to a different world point: break freehand gestures so no stray line is drawn across the jump
+  if (act && (act.type === 'ink' || act.type === 'laser' || act.type === 'erase')) { act.paused = true; act.panned = true; }
+}
+view.addEventListener('wheel', e => {
+  e.preventDefault();
+  let d = e.deltaY; if (e.deltaMode === 1) d *= 16;
+  if (e.shiftKey && !e.ctrlKey) panBy(-(e.deltaX || d), 0);
+  else if (e.altKey) panBy(0, -d);
+  else zoomAt(e.clientX, e.clientY, Math.exp(-d * (e.ctrlKey ? 0.01 : 0.0015)));
+}, { passive: false });
+
+/* ---------- history and persistence ---------- */
+const clone = it => ({ ...it });
+function commit() {
+  hist.length = hi + 1;
+  hist.push(items.map(clone));
+  if (hist.length > 150) hist.shift();
+  hi = hist.length - 1;
+  save();
+}
+function restore() {
+  items = hist[hi].map(clone);
+  const ids = new Set(items.map(i => i.id));
+  sel = new Set([...sel].filter(id => ids.has(id)));
+  sync(); save();
+}
+function undo() { endEdit(); if (hi > 0) { hi--; restore(); } }
+function redo() { endEdit(); if (hi < hist.length - 1) { hi++; restore(); } }
+/* ---------- boards: stored in IndexedDB (images stay embedded in each board record) ---------- */
+let db = null, saveT;
+let curBoard = { id: null, name: 'Untitled' };
+const setStatus = t => { $('#status').textContent = t; };
+function openDB() {
+  return new Promise((res, rej) => {
+    const q = indexedDB.open('whiteboard-db', 1);
+    q.onupgradeneeded = () => q.result.createObjectStore('boards', { keyPath: 'id' });
+    q.onsuccess = () => res(q.result);
+    q.onerror = () => rej(q.error);
+  });
+}
+function tx(mode, fn) {   // run one request in its own transaction, resolve with its result once committed
+  return new Promise((res, rej) => {
+    const t = db.transaction('boards', mode);
+    const rq = fn(t.objectStore('boards'));
+    t.oncomplete = () => res(rq && rq.result);
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error);
+  });
+}
+function saveNow() {
+  clearTimeout(saveT);
+  if (!db || !curBoard.id) return Promise.resolve();
+  setStatus('Saving…');
+  const rec = { id: curBoard.id, name: curBoard.name, updated: Date.now(), data: { items, V, theme, grid } };
+  return tx('readwrite', s => s.put(rec)).then(() => setStatus('Saved'), () => setStatus('Save failed'));
+}
+function save() { clearTimeout(saveT); setStatus('Unsaved'); saveT = setTimeout(saveNow, 400); }
+function apply(d) {   // replace the board contents with data d ({} = empty board)
+  items = Array.isArray(d.items) ? d.items : [];
+  V = d.V || { x: 0, y: 0, z: 1 };
+  if (THEMES[d.theme]) theme = d.theme;
+  grid = d.grid !== false;
+  const dark = lum(THEMES[theme]) < 0.5;   // keep the default ink visible on the background
+  if (dark && penC === PAL[0]) penC = PAL[1]; else if (!dark && penC === PAL[1]) penC = PAL[0];
+}
+function load(text) { apply(JSON.parse(text)); }
+function resetHistory() { hist = [items.map(clone)]; hi = 0; }
+
+async function switchTo(b) {
+  curBoard = { id: b.id, name: b.name };
+  try { localStorage.setItem('wb-current', b.id); } catch (e) { /* ignore */ }
+  apply(b.data || {}); sel = new Set(); resetHistory();
+  $('#bname').value = b.name;
+  applyView(); sync(); setStatus('Saved');
+}
+async function openBoard(id) {
+  endEdit(); await saveNow();
+  const b = await tx('readonly', s => s.get(id));
+  if (b) await switchTo(b);
+  renderBoards();
+}
+async function newBoard() {
+  endEdit(); await saveNow();
+  const b = { id: newId(), name: 'Untitled', updated: Date.now(), data: {} };
+  await tx('readwrite', s => s.put(b));
+  await switchTo(b); renderBoards();
+}
+async function renameBoard(id) {
+  const b = await tx('readonly', s => s.get(id));
+  if (!b) return;
+  const n = prompt('Board name', b.name);
+  if (n === null || !n.trim()) return;
+  if (id === curBoard.id) { curBoard.name = n.trim(); $('#bname').value = curBoard.name; await saveNow(); }
+  else { b.name = n.trim(); await tx('readwrite', s => s.put(b)); }
+  renderBoards();
+}
+async function deleteBoard(id) {
+  const all = await tx('readonly', s => s.getAll());
+  const b = all.find(x => x.id === id);
+  if (!b || !confirm(`Delete board "${b.name}"? This cannot be undone.`)) return;
+  const wasCurrent = id === curBoard.id;
+  if (wasCurrent) { clearTimeout(saveT); curBoard.id = null; }   // stops autosave from recreating it
+  await tx('readwrite', s => s.delete(id));
+  if (wasCurrent) {
+    const rest = all.filter(x => x.id !== id).sort((a, c) => c.updated - a.updated);
+    if (rest.length) await switchTo(rest[0]); else await newBoard();
+  }
+  renderBoards();
+}
+async function renderBoards() {
+  if (!db || $('#boards').hidden) return;
+  const all = (await tx('readonly', s => s.getAll())).sort((a, b) => b.updated - a.updated);
+  const box = $('#blist');
+  box.textContent = '';
+  const btn = (label, fn) => { const x = document.createElement('button'); x.textContent = label; x.onclick = fn; return x; };
+  for (const b of all) {
+    const row = document.createElement('div'); row.className = 'brow';
+    const n = btn(b.name, () => openBoard(b.id));
+    n.className = 'bname' + (b.id === curBoard.id ? ' on' : '');
+    n.title = 'Last saved ' + new Date(b.updated).toLocaleString();
+    row.append(n, btn('Rename', () => renameBoard(b.id)), btn('Delete', () => deleteBoard(b.id)));
+    box.append(row);
+  }
+}
+
+/* ---------- ink and laser ---------- */
+function startInk(x, y) {
+  const t = { type: 'stroke', pts: [[r(x), r(y)]], c: cur(), sw: tool === 'hl' ? size * 4 : size, hl: tool === 'hl' };
+  const el = mk(t); fill(t, el); ov.appendChild(el);
+  act.t = t; act.el = el; act.s = [x, y]; act.raw = [x, y];
+}
+function flushInk() {   // turn the live preview stroke into a real item
+  act.el.remove();
+  if (act.t.pts.length > 1 || !act.panned) { items.push({ ...act.t, id: newId() }); act.drawn = true; }
+  sync();
+}
+function startLaser(x, y) {
+  const t = { type: 'stroke', pts: [[r(x), r(y)]], c: LASER, sw: 5 / V.z, hl: false };
+  const el = mk(t); fill(t, el);
+  el.style.filter = `drop-shadow(0 0 4px ${LASER})`;
+  ov.appendChild(el);
+  const l = { el, end: Infinity };
+  lasers.push(l);
+  act.t = t; act.l = l; act.el = el; act.s = [x, y];
+}
+function addPoints(e) {   // shared by ink and laser: smoothed, distance-filtered sampling
+  const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  for (const ev of (evs.length ? evs : [e])) {
+    const [x, y] = toW(ev.clientX, ev.clientY);
+    act.raw = [x, y];
+    act.s[0] += (x - act.s[0]) * SMOOTH; act.s[1] += (y - act.s[1]) * SMOOTH;
+    const q = act.t.pts[act.t.pts.length - 1];
+    if (Math.hypot(act.s[0] - q[0], act.s[1] - q[1]) * V.z >= 1.5) act.t.pts.push([r(act.s[0]), r(act.s[1])]);
+  }
+  fill(act.t, act.el);
+}
+function tick() {
+  const now = performance.now(), delay = laserSec * 1000;
+  lasers = lasers.filter(l => {
+    const age = now - l.end - delay;
+    if (age <= 0) return true;
+    const o = 1 - age / 700;
+    if (o <= 0) { l.el.remove(); return false; }
+    l.el.style.opacity = o;
+    return true;
+  });
+  raf = lasers.length ? requestAnimationFrame(tick) : 0;
+}
+function kick() { if (!raf) raf = requestAnimationFrame(tick); }
+
+/* ---------- eraser ---------- */
+function eraseAt(x, y) {   // removes whole strokes/lines/shapes touched by the eraser circle
+  const R = eR() / V.z, n = items.length;
+  items = items.filter(it => it.type === 'text' || it.type === 'image' || !hit(it, x, y, R));
+  return items.length !== n;
+}
+
+/* ---------- shapes ---------- */
+function makeShape(x0, y0, x1, y1, shift) {
+  let dx = x1 - x0, dy = y1 - y0;
+  if (kind === 'line' || kind === 'arrow') {
+    if (shift) { const a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI / 4, l = Math.hypot(dx, dy); dx = l * Math.cos(a); dy = l * Math.sin(a); }
+    return { type: 'line', arrow: kind === 'arrow', pts: [[r(x0), r(y0)], [r(x0 + dx), r(y0 + dy)]], c: penC, sw: size };
+  }
+  if (shift) { const m = Math.max(Math.abs(dx), Math.abs(dy)); dx = (dx < 0 ? -1 : 1) * m; dy = (dy < 0 ? -1 : 1) * m; }
+  return { type: 'shape', k: kind, x: r(Math.min(x0, x0 + dx)), y: r(Math.min(y0, y0 + dy)), w: r(Math.abs(dx)), h: r(Math.abs(dy)), c: penC, sw: size, f: fillOn ? penC : '' };
+}
+
+/* ---------- moving and resizing ---------- */
+const geom = it => ({ pts: it.pts, x: it.x, y: it.y, w: it.w, h: it.h, fs: it.fs });
+function setGeom(it, g, dx, dy) {
+  if (it.pts) it.pts = g.pts.map(p => [p[0] + dx, p[1] + dy]);
+  else { it.x = g.x + dx; it.y = g.y + dy; }
+}
+function scaleGeom(it, g, sx, sy, ox, oy, uniform) {
+  if (it.pts) { it.pts = g.pts.map(p => [ox + (p[0] - ox) * sx, oy + (p[1] - oy) * sy]); return; }
+  it.x = ox + (g.x - ox) * sx; it.y = oy + (g.y - oy) * sy;
+  it.w = g.w * sx;
+  if (it.type === 'text') { it.w = Math.max(40, it.w); if (uniform) it.fs = Math.max(6, r(g.fs * sx)); }
+  else it.h = g.h * sy;
+}
+
+/* ---------- text editing ---------- */
+function startEdit(id, isNew) {
+  const it = items.find(i => i.id === id), el = els.get(id);
+  if (!it || !el) return;
+  editing = { id, isNew, html: it.html };
+  sel = new Set([id]);
+  el.contentEditable = 'true'; el.classList.add('edit'); el.focus();
+  const rg = document.createRange(); rg.selectNodeContents(el); rg.collapse(false);
+  const s = getSelection(); s.removeAllRanges(); s.addRange(rg);
+  drawSel(); updateUI();
+}
+function endEdit() {
+  if (!editing) return;
+  const { id, isNew, html } = editing;
+  editing = null;
+  const el = els.get(id), it = items.find(i => i.id === id);
+  if (!el || !it) return;
+  el.contentEditable = 'false'; el.classList.remove('edit');
+  getSelection().removeAllRanges();
+  if (!el.textContent.trim()) {   // empty boxes are removed
+    items = items.filter(i => i !== it); sel.delete(id);
+    if (!isNew) commit();
+    sync(); return;
+  }
+  it.html = el.innerHTML; el._h = it.html;
+  if (isNew || it.html !== html) commit();
+  sync();
+}
+function fmt(cmd) {   // bold/underline: selected text while editing, else the whole box
+  if (editing) { document.execCommand(cmd); return; }
+  const ts = selItems().filter(i => i.type === 'text');
+  if (!ts.length) return;
+  for (const it of ts) {
+    const el = els.get(it.id);
+    el.contentEditable = 'true'; el.focus();
+    document.execCommand('selectAll'); document.execCommand(cmd);
+    el.contentEditable = 'false'; el.blur();
+    it.html = el.innerHTML; el._h = it.html;
+  }
+  getSelection().removeAllRanges();
+  commit(); sync();
+}
+world.addEventListener('focusout', e => { if (editing && e.target === els.get(editing.id)) endEdit(); });
+
+/* ---------- selection operations ---------- */
+function layer(op) {
+  if (!sel.size) return;
+  const s = i => sel.has(i.id);
+  if (op === 'front') items = [...items.filter(i => !s(i)), ...items.filter(s)];
+  else if (op === 'back') items = [...items.filter(s), ...items.filter(i => !s(i))];
+  else if (op === 'up') { for (let i = items.length - 2; i >= 0; i--) if (s(items[i]) && !s(items[i + 1])) [items[i], items[i + 1]] = [items[i + 1], items[i]]; }
+  else { for (let i = 1; i < items.length; i++) if (s(items[i]) && !s(items[i - 1])) [items[i], items[i - 1]] = [items[i - 1], items[i]]; }
+  sync(); commit();
+}
+function del() { if (!sel.size) return; items = items.filter(i => !sel.has(i.id)); sel = new Set(); sync(); commit(); }
+function dup() {
+  const n = [];
+  for (const it of items) if (sel.has(it.id)) {
+    const c = { ...it, id: newId() };
+    if (c.pts) c.pts = c.pts.map(p => [p[0] + 20, p[1] + 20]); else { c.x += 20; c.y += 20; }
+    n.push(c);
+  }
+  if (!n.length) return;
+  items.push(...n); sel = new Set(n.map(i => i.id)); sync(); commit();
+}
+function nudge(dx, dy) { for (const it of selItems()) setGeom(it, geom(it), dx, dy); sync(); commit(); }
+function setColor(c, doCommit) {
+  if (tool === 'hl') hlC = c; else penC = c;
+  if (sel.size) {
+    for (const it of selItems()) { if (it.type === 'text') it.color = c; else if (it.type !== 'image') it.c = c; }
+    sync(); if (doCommit) commit();
+  }
+  updateUI();
+}
+function setSize(v, doCommit) {
+  size = Math.min(40, Math.max(1, v)); $('#size').value = size;
+  if (sel.size) {
+    for (const it of selItems()) if (it.type === 'stroke' || it.type === 'line' || it.type === 'shape') it.sw = it.hl ? size * 4 : size;
+    sync(); if (doCommit) commit();
+  }
+}
+
+/* ---------- images ---------- */
+function addImage(file, at) {
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => {
+      const s = Math.min(1, 0.6 * innerWidth / V.z / im.naturalWidth, 0.7 * innerHeight / V.z / im.naturalHeight);
+      const w = r(im.naturalWidth * s), h = r(im.naturalHeight * s);
+      const [cx, cy] = at || toW(innerWidth / 2, innerHeight / 2);
+      const item = { id: newId(), type: 'image', src: fr.result, x: r(cx - w / 2), y: r(cy - h / 2), w, h };
+      // Default layering: above older images, below every drawing/text, so writing over an image always works.
+      let k = -1;
+      items.forEach((it, i) => { if (it.type === 'image') k = i; });
+      items.splice(k + 1, 0, item);
+      sync(); commit();
+    };
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(file);
+}
+document.addEventListener('paste', e => {
+  if (editing) {   // plain text only inside text boxes
+    e.preventDefault();
+    document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
+    return;
+  }
+  if (/^(INPUT|SELECT)$/.test(e.target.tagName)) return;
+  for (const it of e.clipboardData.items) if (it.type.startsWith('image/')) { e.preventDefault(); addImage(it.getAsFile()); }
+});
+view.addEventListener('dragover', e => e.preventDefault());
+view.addEventListener('drop', e => {
+  e.preventDefault();
+  for (const f of e.dataTransfer.files) if (f.type.startsWith('image/')) addImage(f, toW(e.clientX, e.clientY));
+});
+
+/* ---------- pointer handling ---------- */
+const ering = $('#ering'), marq = $('#marq');
+function ring() {
+  if (tool !== 'eraser') { ering.style.display = 'none'; return; }
+  const d = eR() * 2;
+  ering.style.cssText = `display:block;left:${last.x}px;top:${last.y}px;width:${d}px;height:${d}px`;
+}
+view.addEventListener('pointerleave', () => { ering.style.display = 'none'; });
+view.addEventListener('contextmenu', e => e.preventDefault());
+
+view.addEventListener('pointerdown', e => {
+  if (!e.isPrimary) return;
+  const ed = editing && els.get(editing.id);
+  if (ed && ed.contains(e.target)) return;   // let the text box handle its own clicks
+  if (editing) endEdit();
+  if (act) return;
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|SELECT)$/.test(ae.tagName)) ae.blur();
+  last = { x: e.clientX, y: e.clientY };
+  if (e.button === 2 || (e.button === 0 && (space || tool === 'pan'))) { act = { type: 'pan' }; view.setPointerCapture(e.pointerId); e.preventDefault(); return; }
+  if (e.button !== 0) return;
+  e.preventDefault();
+  view.setPointerCapture(e.pointerId);
+  const [x, y] = toW(e.clientX, e.clientY);
+
+  if (tool === 'pen' || tool === 'hl') { act = { type: 'ink' }; startInk(x, y); }
+  else if (tool === 'laser') { act = { type: 'laser' }; startLaser(x, y); }
+  else if (tool === 'eraser') {
+    act = { type: 'erase', p: [x, y], ch: false };
+    if (eraseAt(x, y)) { act.ch = true; sync(); }
+  }
+  else if (tool === 'shape') act = { type: 'shape', x0: x, y0: y, t: null, el: null };
+  else if (tool === 'text') {
+    const p = pick(x, y);
+    if (p && p.type === 'text') { const id = p.id; setTimeout(() => startEdit(id, false)); }
+    else {
+      sel = new Set();
+      const it = { id: newId(), type: 'text', x: r(x), y: r(y), w: 220, html: '', fs: 24, color: penC, bg: '' };
+      items.push(it); sync();
+      setTimeout(() => startEdit(it.id, true));   // deferred so the browser's own focus handling does not cancel it
+    }
+  }
+  else if (tool === 'select') {
+    const h = e.target.dataset && e.target.dataset.h;
+    if (h) act = { type: 'rs', h, B: selBox(), o: new Map(selItems().map(i => [i.id, geom(i)])) };
+    else {
+      const p = pick(x, y);
+      if (p) {
+        let start = true;
+        if (e.shiftKey) { if (sel.has(p.id)) { sel.delete(p.id); start = false; } else sel.add(p.id); }
+        else if (!sel.has(p.id)) sel = new Set([p.id]);
+        if (start) act = { type: 'move', x0: x, y0: y, sx: e.clientX, sy: e.clientY, pid: p.id, shift: e.shiftKey, moved: false,
+                           o: new Map(selItems().map(i => [i.id, geom(i)])) };
+      } else {
+        const keep = e.shiftKey ? new Set(sel) : new Set();
+        sel = new Set(keep);
+        act = { type: 'marq', sx: e.clientX, sy: e.clientY, keep };
+      }
+    }
+    drawSel(); updateUI();
+  }
+});
+
+function resume(x, y) {   // first move after a pan interrupted a freehand gesture
+  act.paused = false;
+  if (act.type === 'ink') { flushInk(); startInk(x, y); }
+  else if (act.type === 'laser') { act.l.end = performance.now(); kick(); startLaser(x, y); }
+  else if (act.type === 'erase') act.p = [x, y];
+}
+
+view.addEventListener('pointermove', e => {
+  const dx = e.clientX - last.x, dy = e.clientY - last.y;
+  last = { x: e.clientX, y: e.clientY };
+  ring();
+  if (!act) return;
+  if (act.type === 'pan' || space) { panBy(dx, dy); return; }
+  const [x, y] = toW(e.clientX, e.clientY);
+  if (act.paused) { resume(x, y); return; }
+  switch (act.type) {
+    case 'ink': case 'laser': addPoints(e); break;
+    case 'erase': {
+      const [px, py] = act.p, n = Math.max(1, Math.ceil(Math.hypot(x - px, y - py) * V.z / 4));
+      let ch = false;
+      for (let i = 1; i <= n; i++) ch = eraseAt(px + (x - px) * i / n, py + (y - py) * i / n) || ch;   // sample along the path so fast strokes do not skip items
+      act.p = [x, y];
+      if (ch) { act.ch = true; sync(); }
+      break;
+    }
+    case 'shape': {
+      const t = makeShape(act.x0, act.y0, x, y, e.shiftKey);
+      if (!act.el) { act.el = mk(t); ov.appendChild(act.el); }
+      act.t = t; fill(t, act.el);
+      break;
+    }
+    case 'move': {
+      if (!act.moved && Math.hypot(e.clientX - act.sx, e.clientY - act.sy) < 3) return;
+      act.moved = true;
+      for (const it of selItems()) { setGeom(it, act.o.get(it.id), x - act.x0, y - act.y0); fill(it, els.get(it.id)); }
+      drawSel();
+      break;
+    }
+    case 'rs': {
+      const B = act.B, h = act.h;
+      const E = h.includes('e'), W = h.includes('w'), N = h.includes('n'), S = h.includes('s');
+      let sx = 1, sy = 1;
+      if (E) sx = (x - B.x) / B.w; else if (W) sx = (B.x + B.w - x) / B.w;
+      if (S) sy = (y - B.y) / B.h; else if (N) sy = (B.y + B.h - y) / B.h;
+      const uniform = h.length === 2;
+      if (uniform) sx = sy = Math.max(sx, sy);
+      sx = Math.max(sx, 0.02); sy = Math.max(sy, 0.02);
+      const ox = E ? B.x : W ? B.x + B.w : 0, oy = S ? B.y : N ? B.y + B.h : 0;
+      for (const it of selItems()) { scaleGeom(it, act.o.get(it.id), sx, sy, ox, oy, uniform); fill(it, els.get(it.id)); }
+      drawSel();
+      break;
+    }
+    case 'marq': {
+      const x0 = Math.min(act.sx, e.clientX), y0 = Math.min(act.sy, e.clientY), x1 = Math.max(act.sx, e.clientX), y1 = Math.max(act.sy, e.clientY);
+      marq.style.cssText = `display:block;left:${x0}px;top:${y0}px;width:${x1 - x0}px;height:${y1 - y0}px`;
+      const [a, b] = toW(x0, y0), [c, d] = toW(x1, y1);
+      sel = new Set(act.keep);
+      for (const it of items) { const bb = bbox(it); if (bb.x < c && bb.x + bb.w > a && bb.y < d && bb.y + bb.h > b) sel.add(it.id); }
+      drawSel(); updateUI();
+      break;
+    }
+  }
+});
+
+function endGesture() {
+  if (!act) return;
+  const a = act;
+  switch (a.type) {
+    case 'ink': {
+      if (!a.paused) {
+        const q = a.t.pts[a.t.pts.length - 1];
+        if (q[0] !== r(a.raw[0]) || q[1] !== r(a.raw[1])) a.t.pts.push([r(a.raw[0]), r(a.raw[1])]);   // smoothing lags; land on the real end point
+      }
+      flushInk();
+      if (a.drawn) commit();
+      break;
+    }
+    case 'laser': a.l.end = performance.now(); kick(); break;
+    case 'erase': if (a.ch) commit(); break;
+    case 'shape':
+      if (a.el) {
+        a.el.remove();
+        const t = a.t, tiny = 2 / V.z;
+        const ok = t.pts ? Math.hypot(t.pts[1][0] - t.pts[0][0], t.pts[1][1] - t.pts[0][1]) > tiny : (t.w > tiny || t.h > tiny);
+        if (ok) { items.push({ ...t, id: newId() }); sync(); commit(); }
+      }
+      break;
+    case 'move':
+      if (a.moved) commit();
+      else if (!a.shift && sel.size > 1) { sel = new Set([a.pid]); drawSel(); updateUI(); }
+      break;
+    case 'rs': commit(); break;
+    case 'marq': marq.style.display = 'none'; break;
+  }
+  act = null;
+}
+view.addEventListener('pointerup', endGesture);
+view.addEventListener('pointercancel', endGesture);
+
+view.addEventListener('dblclick', e => {
+  if (tool !== 'select') return;
+  const p = pick(...toW(e.clientX, e.clientY));
+  if (p && p.type === 'text') startEdit(p.id, false);
+});
+
+/* ---------- keyboard ---------- */
+const TOOL_KEYS = Object.fromEntries(TOOLS.map(t => [t[2], t[0]]));
+const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+document.addEventListener('keydown', e => {
+  const tg = e.target, k = e.key, c = e.ctrlKey || e.metaKey;
+  if (editing) {
+    if (k === 'Escape') endEdit();
+    else if (c && !e.shiftKey && !e.altKey && (k.toLowerCase() === 'b' || k.toLowerCase() === 'u')) {
+      e.preventDefault(); document.execCommand(k.toLowerCase() === 'b' ? 'bold' : 'underline');
+    }
+    return;
+  }
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(tg.tagName)) { if (k === 'Escape' || k === 'Enter') tg.blur(); return; }
+  if (k === ' ') { e.preventDefault(); if (!space) { space = true; view.classList.add('grab'); } return; }
+  if (c) {
+    const l = k.toLowerCase();
+    if (l === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+    else if (l === 'y') { e.preventDefault(); redo(); }
+    else if (l === 'a') { e.preventDefault(); setTool('select'); sel = new Set(items.map(i => i.id)); drawSel(); updateUI(); }
+    else if (l === 'd') { e.preventDefault(); dup(); }
+    else if (k === ']' || k === '}') { e.preventDefault(); layer(e.shiftKey ? 'front' : 'up'); }
+    else if (k === '[' || k === '{') { e.preventDefault(); layer(e.shiftKey ? 'back' : 'down'); }
+    return;
+  }
+  if (e.altKey) return;
+  const lk = k.toLowerCase();
+  if (k >= '1' && k <= '8') setColor(PAL[k - 1], true);
+  else if (TOOL_KEYS[lk]) setTool(TOOL_KEYS[lk]);
+  else if (k === '[') setSize(size - 1, true);
+  else if (k === ']') setSize(size + 1, true);
+  else if (k === '+' || k === '=') zoomAt(innerWidth / 2, innerHeight / 2, 1.25);
+  else if (k === '-') zoomAt(innerWidth / 2, innerHeight / 2, 0.8);
+  else if (k === '0') zoomAt(innerWidth / 2, innerHeight / 2, 1 / V.z);
+  else if (lk === 'g') toggleGrid();
+  else if (k === '?') $('#help').hidden = !$('#help').hidden;
+  else if (k === 'Delete' || k === 'Backspace') del();
+  else if (k === 'Escape') { sel = new Set(); drawSel(); updateUI(); }
+  else if (ARROWS[k]) {
+    e.preventDefault();
+    const [ax, ay] = ARROWS[k];
+    if (act || !sel.size) panBy(-ax * 60, -ay * 60);
+    else nudge(ax * (e.shiftKey ? 10 : 1), ay * (e.shiftKey ? 10 : 1));
+  }
+});
+document.addEventListener('keyup', e => { if (e.key === ' ') { space = false; view.classList.remove('grab'); } });
+window.addEventListener('blur', () => { space = false; view.classList.remove('grab'); });
+window.addEventListener('resize', drawSel);
+
+/* ---------- toolbar ---------- */
+function setTool(t) {
+  endEdit();
+  tool = t; sel = new Set();
+  view.dataset.tool = t;
+  ring(); drawSel(); updateUI();
+}
+function toggleGrid() { grid = !grid; drawBg(); updateUI(); save(); }
+function setTheme(t) {
+  theme = t;
+  const dark = lum(THEMES[t]) < 0.5;   // swap default ink so it stays visible
+  if (dark && penC === PAL[0]) penC = PAL[1]; else if (!dark && penC === PAL[1]) penC = PAL[0];
+  drawBg(); updateUI(); save();
+}
+function updateUI() {
+  document.querySelectorAll('#tools button').forEach(b => b.classList.toggle('on', b.dataset.tool === tool));
+  document.querySelectorAll('#pal .sw').forEach(b => b.classList.toggle('on', b.dataset.c === cur()));
+  document.querySelectorAll('[data-kind]').forEach(b => b.classList.toggle('on', b.dataset.kind === kind));
+  $('#grid').classList.toggle('on', grid);
+  $('#theme').value = theme;
+  if (/^#[0-9a-f]{6}$/i.test(cur())) $('#cc').value = cur();
+  const s = selItems(), hasText = s.some(i => i.type === 'text');
+  $('#c-shape').hidden = tool !== 'shape';
+  $('#c-laser').hidden = tool !== 'laser';
+  $('#c-sel').hidden = !s.length;
+  $('#c-txt').hidden = !hasText;
+  $('#ctx').style.display = (tool === 'shape' || tool === 'laser' || s.length) ? 'flex' : 'none';
+  const fs = $('#fs'), fl = $('#fill');
+  const t0 = s.find(i => i.type === 'text');
+  if (t0 && document.activeElement !== fs) fs.value = t0.fs;
+  const f0 = s.map(i => i.f || i.bg).find(Boolean);
+  if (f0 && /^#[0-9a-f]{6}$/i.test(f0) && document.activeElement !== fl) fl.value = f0;
+}
+
+// build tool buttons, swatches, theme list
+$('#tools').append(...TOOLS.map(([id, title, key]) => {
+  const b = document.createElement('button'); b.dataset.tool = id; b.title = title; b.textContent = title.replace(/ \(.\)/, ''); return b;
+}));
+$('#pal').append(...PAL.map((c, i) => {
+  const b = document.createElement('button'); b.className = 'sw'; b.dataset.c = c; b.title = 'Color ' + (i + 1); b.style.background = c; return b;
+}));
+$('#theme').append(...Object.keys(THEMES).map(t => { const o = document.createElement('option'); o.textContent = t; return o; }));
+
+// keep focus (and the text selection inside an edited box) when clicking toolbar buttons
+$('#ui').addEventListener('mousedown', e => { if (!/^(INPUT|SELECT|OPTION)$/.test(e.target.tagName)) e.preventDefault(); });
+$('#ui').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const d = b.dataset;
+  if (d.tool) setTool(d.tool);
+  else if (d.c) setColor(d.c, true);
+  else if (d.kind) { kind = d.kind; updateUI(); }
+  else if (d.l) layer(d.l);
+});
+$('#cc').addEventListener('input', e => setColor(e.target.value, false));
+$('#cc').addEventListener('change', e => { if (sel.size) commit(); });
+$('#size').addEventListener('input', e => setSize(+e.target.value, false));
+$('#size').addEventListener('change', () => { if (sel.size) commit(); });
+$('#fillon').addEventListener('change', e => { fillOn = e.target.checked; });
+$('#laserSec').addEventListener('input', e => { laserSec = Math.max(0.5, +e.target.value || 3); });
+$('#undo').onclick = undo; $('#redo').onclick = redo;
+$('#theme').addEventListener('change', e => setTheme(e.target.value));
+$('#grid').onclick = toggleGrid;
+$('#zl').onclick = () => zoomAt(innerWidth / 2, innerHeight / 2, 1 / V.z);
+$('#helpBtn').onclick = () => { $('#help').hidden = !$('#help').hidden; };
+$('#bold').onclick = () => fmt('bold');
+$('#und').onclick = () => fmt('underline');
+$('#dup').onclick = dup; $('#del').onclick = del;
+$('#nofill').onclick = () => {
+  for (const it of selItems()) { if (it.type === 'shape') it.f = ''; else if (it.type === 'text') it.bg = ''; }
+  sync(); commit();
+};
+$('#fill').addEventListener('input', e => {
+  for (const it of selItems()) { if (it.type === 'shape') it.f = e.target.value; else if (it.type === 'text') it.bg = e.target.value; }
+  sync();
+});
+$('#fill').addEventListener('change', commit);
+$('#fs').addEventListener('input', e => {
+  const v = +e.target.value; if (!(v >= 6)) return;
+  for (const it of selItems()) if (it.type === 'text') it.fs = Math.min(400, v);
+  sync();
+});
+$('#fs').addEventListener('change', commit);
+$('#img').onclick = () => $('#fileImg').click();
+$('#fileImg').onchange = e => { for (const f of e.target.files) addImage(f); e.target.value = ''; };
+$('#save').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({ items, V, theme, grid })], { type: 'application/json' }));
+  a.download = 'whiteboard.json'; a.click(); URL.revokeObjectURL(a.href);
+};
+$('#open').onclick = () => $('#fileJson').click();
+$('#fileJson').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => { try { load(t); sel = new Set(); applyView(); sync(); commit(); } catch (err) { alert('Invalid whiteboard file'); } });
+  e.target.value = '';
+};
+$('#clear').onclick = () => { if (items.length && confirm('Remove everything from the board?')) { endEdit(); items = []; sel = new Set(); sync(); commit(); } };
+
+$('#boardsBtn').onclick = () => { $('#boards').hidden = !$('#boards').hidden; renderBoards(); };
+$('#bnew').onclick = newBoard;
+$('#bname').addEventListener('change', e => { curBoard.name = e.target.value.trim() || 'Untitled'; e.target.value = curBoard.name; saveNow().then(renderBoards); });
+$('#boards').addEventListener('mousedown', e => { if (!/^(INPUT|SELECT|OPTION)$/.test(e.target.tagName)) e.preventDefault(); });
+window.addEventListener('pagehide', () => { saveNow(); });
+
+/* ---------- boot ---------- */
+resetHistory(); applyView(); sync();
+(async () => {
+  try {
+    db = await openDB();
+    let all = await tx('readonly', s => s.getAll());
+    if (!all.length) {   // first run: adopt the old single-board autosave if present
+      let data = {};
+      try { const old = localStorage.getItem('wb-v1'); if (old) data = JSON.parse(old); } catch (e) { /* ignore */ }
+      const b = { id: newId(), name: 'Board 1', updated: Date.now(), data };
+      await tx('readwrite', s => s.put(b));
+      all = [b];
+    }
+    let wanted = null;
+    try { wanted = localStorage.getItem('wb-current'); } catch (e) { /* ignore */ }
+    await switchTo(all.find(x => x.id === wanted) || all.sort((a, c) => c.updated - a.updated)[0]);
+  } catch (e) { setStatus('Storage unavailable'); }
+})();
+</script>
+</body>
+</html>
